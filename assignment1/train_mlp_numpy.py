@@ -29,6 +29,7 @@ from copy import deepcopy
 from mlp_numpy import MLP
 from modules import CrossEntropyModule
 import cifar10_utils
+import matplotlib.pyplot as plt
 
 import torch
 
@@ -48,6 +49,11 @@ def confusion_matrix(predictions, targets):
     #######################
     # PUT YOUR CODE HERE  #
     #######################
+    conf_mat = np.zeros((10, 10))
+    for i in range(predictions.shape[0]):
+        conf_mat[int(targets[i]), np.argmax(predictions[i])] += 1
+
+    #print(conf_mat)
 
     #######################
     # END OF YOUR CODE    #
@@ -69,6 +75,13 @@ def confusion_matrix_to_metrics(confusion_matrix, beta=1.):
     #######################
     # PUT YOUR CODE HERE  #
     #######################
+
+    accuracy = np.sum(np.diag(confusion_matrix)) / np.sum(confusion_matrix)
+    precision = np.diag(confusion_matrix) / np.sum(confusion_matrix, axis=0)
+    recall = np.diag(confusion_matrix) / np.sum(confusion_matrix, axis=1)
+    f1_beta = (1 + beta**2) * (precision * recall) / (beta**2 * precision + recall)
+
+    metrics = {"accuracy": accuracy, "precision": precision, "recall": recall, "f1_beta": f1_beta}
 
     #######################
     # END OF YOUR CODE    #
@@ -96,6 +109,17 @@ def evaluate_model(model, data_loader, num_classes=10):
     #######################
     # PUT YOUR CODE HERE  #
     #######################
+
+    predictions = np.empty((0, num_classes))
+    targets = np.array([])
+
+    print("Evaluating model...")
+    for x, y in tqdm(data_loader):
+        predictions = np.vstack((predictions, model.forward(x)))
+        targets = np.append(targets, y)
+    
+    conf_mat = confusion_matrix(predictions, targets)
+    metrics = confusion_matrix_to_metrics(conf_mat)
 
     #######################
     # END OF YOUR CODE    #
@@ -145,24 +169,88 @@ def train(hidden_dims, lr, batch_size, epochs, seed, data_dir):
     cifar10_loader = cifar10_utils.get_dataloader(cifar10, batch_size=batch_size,
                                                   return_numpy=True)
 
+
     #######################
     # PUT YOUR CODE HERE  #
     #######################
 
-    # TODO: Initialize model and loss module
-    model = ...
-    loss_module = ...
-    # TODO: Training loop including validation
-    val_accuracies = ...
+    print('Hidden dimensions: {}'.format(hidden_dims))
+    print('Learning rate: {}'.format(lr))
+    print('Batch size: {}'.format(batch_size))
+    print('Epochs: {}'.format(epochs))
+
+    model = MLP(3*32*32, hidden_dims, 10)
+    loss_module = CrossEntropyModule()
+    loss = None
+    losses = []
+
+    val_accuracies = []
+    best_model = None
+    best_acc = 0
+    
+    for epoch in range(1, epochs+1):
+      print('Epoch: {}'.format(epoch))
+      
+      for features, labels in tqdm(cifar10_loader['train']):
+        output = model.forward(features)
+        loss = loss_module.forward(output, labels)
+        
+        loss_grad = loss_module.backward(output, labels)
+        model.backward(loss_grad)
+        losses.append(loss)
+        # update weights:
+        for module in model.modules:
+          if hasattr(module, 'params'):
+            module.params['weight'] -= lr * module.grads['weight']
+            module.params['bias'] -= lr * module.grads['bias']
+      print('Loss: {}'.format(loss))
+      
+      val_metrics = evaluate_model(model, cifar10_loader['validation'])
+
+      print('Mean validation accuracy epoch {}: {}'.format(epoch, np.mean(val_metrics['accuracy'])))
+
+      val_accuracies.append(np.mean(val_metrics['accuracy']))
+
+      
+      if np.mean(val_metrics['accuracy']) > best_acc:
+        best_model = deepcopy(model)
+        best_acc = np.mean(val_metrics['accuracy'])
+      
+      #print('Validation accuracy: {}'.format(metrics['accuracy']))
+      # print('Validation precision: {}'.format(metrics['precision']))
+      # print('Validation recall: {}'.format(metrics['recall']))
+      # print('Validation f1_beta: {}'.format(metrics['f1_beta']))
+
+    
     # TODO: Test best model
-    test_accuracy = ...
+    test_metrics = evaluate_model(best_model, cifar10_loader['test'])
+    test_accuracy = np.mean(test_metrics['accuracy'])
+    print('Test accuracy: {}'.format(test_accuracy))
+    
     # TODO: Add any information you might want to save for plotting
-    logging_info = ...
+    logging_info = {"loss": losses}
+    
     #######################
     # END OF YOUR CODE    #
     #######################
 
-    return model, val_accuracies, test_accuracy, logging_dict
+    return best_model, val_accuracies, test_accuracy, logging_info
+
+
+def plot_loss_acc(loss, acc):
+  plt.figure()
+  plt.plot(np.arange(1, len(loss)+1), loss)
+  plt.title('Loss')
+  plt.xlabel('Iteration')
+  plt.ylabel('Loss')
+  plt.show()
+
+  plt.figure()
+  plt.plot(np.arange(1, len(acc)+1), acc)
+  plt.title('Accuracy')
+  plt.xlabel('Epoch')
+  plt.ylabel('Accuracy')
+  plt.show()
 
 
 if __name__ == '__main__':
@@ -190,6 +278,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     kwargs = vars(args)
 
-    train(**kwargs)
+    best_model, val_acc, test_acc, logging_info = train(**kwargs)
     # Feel free to add any additional functions, such as plotting of the loss curve here
+
+    plot_loss_acc(logging_info['loss'], val_acc)
+    
+
+
+  
+
+
     

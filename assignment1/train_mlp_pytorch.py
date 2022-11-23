@@ -32,7 +32,8 @@ import cifar10_utils
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
+import matplotlib.pyplot as plt
+from sklearn.metrics import ConfusionMatrixDisplay
 
 def confusion_matrix(predictions, targets):
     """
@@ -49,14 +50,16 @@ def confusion_matrix(predictions, targets):
     #######################
     # PUT YOUR CODE HERE  #
     #######################
-
+    conf_mat = np.zeros((10, 10))
+    for i in range(predictions.shape[0]):
+        conf_mat[int(targets[i]), np.argmax(predictions[i])] += 1
     #######################
     # END OF YOUR CODE    #
     #######################
     return conf_mat
 
 
-def confusion_matrix_to_metrics(confusion_matrix, beta=1.):
+def confusion_matrix_to_metrics(confusion_matrix, beta=10.0):
     """
     Converts a confusion matrix to accuracy, precision, recall and f1 scores.
     Args:
@@ -67,9 +70,12 @@ def confusion_matrix_to_metrics(confusion_matrix, beta=1.):
         recall: 1D float array of size [n_classes], the recall for each clas
         f1_beta: 1D float array of size [n_classes], the f1_beta scores for each class
     """
-    #######################
-    # PUT YOUR CODE HERE  #
-    #######################
+    accuracy = np.sum(np.diag(confusion_matrix)) / np.sum(confusion_matrix)
+    precision = np.diag(confusion_matrix) / np.sum(confusion_matrix, axis=0)
+    recall = np.diag(confusion_matrix) / np.sum(confusion_matrix, axis=1)
+    f1_beta = (1 + beta**2) * (precision * recall) / (beta**2 * precision + recall)
+
+    metrics = {"accuracy": accuracy, "precision": precision, "recall": recall, "f1_beta": f1_beta}
 
     #######################
     # END OF YOUR CODE    #
@@ -97,6 +103,32 @@ def evaluate_model(model, data_loader, num_classes=10):
     #######################
     # PUT YOUR CODE HERE  #
     #######################
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    model.eval()
+
+    predictions = torch.empty(0, num_classes).to(device)
+    targets = torch.empty(0, dtype=torch.long).to(device)
+    
+    with torch.no_grad():
+        for x, y in data_loader:
+            x = x.to(device)
+            y = y.to(device)
+            pred = model(x)
+            predictions = torch.cat((predictions, pred))
+            targets = torch.cat((targets, y))
+
+    
+    conf_mat = confusion_matrix(predictions.cpu().numpy(), targets.cpu().numpy())
+
+    # plot confusion matrix
+    # _, ax = plt.subplots(figsize=(10, 10))
+    # disp = ConfusionMatrixDisplay(confusion_matrix=conf_mat, display_labels=np.arange(10))
+    # disp.plot(ax=ax, values_format='.3g')
+    # plt.show()
+
+    metrics = confusion_matrix_to_metrics(conf_mat)
 
     #######################
     # END OF YOUR CODE    #
@@ -148,31 +180,88 @@ def train(hidden_dims, lr, use_batch_norm, batch_size, epochs, seed, data_dir):
 
     # Set default device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+    
+    #print(device.type)
     # Loading the dataset
     cifar10 = cifar10_utils.get_cifar10(data_dir)
     cifar10_loader = cifar10_utils.get_dataloader(cifar10, batch_size=batch_size,
                                                   return_numpy=False)
+
 
     #######################
     # PUT YOUR CODE HERE  #
     #######################
 
     # TODO: Initialize model and loss module
-    model = ...
-    loss_module = ...
-    # TODO: Training loop including validation
-    # TODO: Do optimization with the simple SGD optimizer
-    val_accuracies = ...
-    # TODO: Test best model
-    test_accuracy = ...
-    # TODO: Add any information you might want to save for plotting
-    logging_info = ...
+    model = MLP(3*32*32, hidden_dims, 10, use_batch_norm).to(device)
+    print(model)
+    loss_module = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(model.parameters(), lr=lr)
+    
+    val_accuracies = []
+    losses = []
+    best_acc = 0
+    best_model = None
+
+    for epoch in range(1, epochs + 1):
+        model.train()
+        for x, y in tqdm(cifar10_loader['train']):
+          x = x.to(device)
+          y = y.to(device)
+          
+          preds = model(x).squeeze(dim=1)
+          loss = loss_module(preds, y)
+          optimizer.zero_grad()
+          loss.backward()
+          losses.append(loss.item())
+          optimizer.step()
+
+        print(f'Epoch: {epoch}, Loss: {loss.item()}')
+        val_metrics = evaluate_model(model, cifar10_loader['validation'])
+        val_accuracies.append(val_metrics['accuracy'])
+
+
+        print(f'Validation Accuracy: {val_metrics["accuracy"]}')
+
+        if val_metrics['accuracy'] > best_acc:
+          best_acc = val_metrics['accuracy']
+          best_model = deepcopy(model)
+    
+
+    # average loss per epoch:
+    avg_loss_per_epoch = np.array(losses).reshape(-1, len(cifar10_loader['train'])).mean(axis=1)
+
+    test_metrics = evaluate_model(best_model, cifar10_loader['test'])
+    print(f'Test f1_beta: {test_metrics["f1_beta"]}')
+    test_accuracy = evaluate_model(best_model, cifar10_loader['test'])['accuracy']
+    print('Test Accuracy: {}'.format(test_accuracy))
+    
+    logging_info = {'losses': losses, 'best_acc': best_acc, 'avg_loss_per_epoch': avg_loss_per_epoch}
+    
     #######################
     # END OF YOUR CODE    #
     #######################
 
     return model, val_accuracies, test_accuracy, logging_info
+
+def plot_loss_acc(loss, acc):
+  plt.figure()
+  plt.plot(np.arange(1, len(loss)+1), loss)
+  plt.title('Loss')
+  plt.xlabel('Epoch')
+  plt.ylabel('Loss')
+  plt.gca().set_ylim(bottom=0)
+  plt.gca().set_ylim(top=3)
+  plt.show()
+
+  plt.figure()
+  plt.plot(np.arange(1, len(acc)+1), acc)
+  plt.title('Accuracy')
+  plt.xlabel('Epoch')
+  plt.ylabel('Accuracy')
+  plt.gca().set_ylim(bottom=0)
+  plt.gca().set_ylim(top=1)
+  plt.show()
 
 
 if __name__ == '__main__':
@@ -201,7 +290,12 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     kwargs = vars(args)
+    _, val_accuracies, _, logging_info = train(**kwargs)
 
-    train(**kwargs)
-    # Feel free to add any additional functions, such as plotting of the loss curve here
+    torch.cuda.empty_cache()
+
+    plot_loss_acc(logging_info['avg_loss_per_epoch'], val_accuracies)
+    print('Best validation accuracy: {}'.format(logging_info['best_acc']))
+
+
     

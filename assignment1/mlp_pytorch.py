@@ -59,7 +59,38 @@ class MLP(nn.Module):
         #######################
         # PUT YOUR CODE HERE  #
         #######################
-        pass
+        super(MLP, self).__init__()
+        self.use_batch_norm = use_batch_norm
+        self.n_inputs = n_inputs
+        self.n_hidden = n_hidden
+        self.n_classes = n_classes
+        
+        # use kaiming initialization on all linear layers
+
+        self.modules = []
+
+        # input layer
+      
+        self.modules.append(nn.Linear(n_inputs, n_hidden[0]))
+        nn.init.zeros_(self.modules[0].bias)
+        self.modules.append(nn.ELU())
+        if self.use_batch_norm:
+            self.modules.append(nn.BatchNorm1d(n_hidden[0]))
+        
+        for i in range(1, len(n_hidden)):
+            self.modules.append(nn.Linear(n_hidden[i-1], n_hidden[i]))
+            nn.init.kaiming_normal_(self.modules[-1].weight, nonlinearity='relu')
+            nn.init.zeros_(self.modules[-1].bias)
+            self.modules.append(nn.ELU())
+            if self.use_batch_norm:
+                self.modules.append(nn.BatchNorm1d(n_hidden[i]))
+        
+        self.modules.append(nn.Linear(n_hidden[-1], n_classes))
+        nn.init.kaiming_normal_(self.modules[-1].weight, nonlinearity='relu')
+        nn.init.zeros_(self.modules[-1].bias)
+
+        self.model = nn.Sequential(*self.modules)
+
         #######################
         # END OF YOUR CODE    #
         #######################
@@ -77,11 +108,12 @@ class MLP(nn.Module):
         TODO:
         Implement forward pass of the network.
         """
-
+        
         #######################
         # PUT YOUR CODE HERE  #
         #######################
-
+        x = x.view(x.shape[0], -1)
+        out = self.model(x)
         #######################
         # END OF YOUR CODE    #
         #######################
