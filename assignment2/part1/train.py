@@ -52,10 +52,12 @@ def get_model(num_classes=100):
     #######################
 
     # Get the pretrained ResNet18 model on ImageNet from torchvision.models
-    pass
+    model = models.resnet18(weights="ResNet18_Weights.DEFAULT")
 
     # Randomly initialize and modify the model's last layer for CIFAR100.
-    pass
+    model.fc = nn.Linear(512, num_classes)
+    nn.init.zeros_(model.fc.bias)
+    nn.init.normal_(model.fc.weight, mean=0, std=0.01)
 
     #######################
     # END OF YOUR CODE    #
@@ -148,19 +150,22 @@ def main(lr, batch_size, epochs, data_dir, seed, augmentation_name):
     # PUT YOUR CODE HERE  #
     #######################
     # Set the seed for reproducibility
-    pass
+    torch.manual_seed(seed)
 
     # Set the device to use for training
-    pass
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Load the model
-    pass
+    model = get_model()
+    print("Success!")
+
 
     # Get the augmentation to use
-    pass
+    augmentation = None
 
     # Train the model
-    pass
+    best_model = train_model(model, lr, batch_size, epochs, data_dir, 
+                             "best_model.pt", device, augmentation)
 
     # Evaluate the model on the test set
     pass
